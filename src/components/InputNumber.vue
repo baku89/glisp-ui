@@ -47,6 +47,7 @@ teleport(to='#GlispUI__overlays')
 import {computed, defineComponent, ref, watchEffect} from 'vue'
 import {useDrag} from '@/use/useDrag'
 import {useElementBounding, useKeyModifier} from '@vueuse/core'
+import {useWheel} from '@vueuse/gesture'
 
 /**
  * Input for number
@@ -73,6 +74,7 @@ export default defineComponent({
 		const root = ref()
 		const input = ref<HTMLInputElement | null>(null)
 
+		const local = ref(props.modelValue)
 		const display = ref(props.modelValue.toString())
 
 		const bound = useElementBounding(root)
@@ -104,7 +106,7 @@ export default defineComponent({
 		const tweakOrigin = ref(props.modelValue)
 
 		let tweakTimer = -1
-		let tweakMode: null | 'value' | 'speed' = null
+		let tweakMode = ref<null | 'value' | 'speed'>(null)
 		let speedDeltaY = 0
 
 		const {dragging: tweaking, xy} = useDrag(root, {
@@ -119,32 +121,45 @@ export default defineComponent({
 				displayPrecision.value = floats ? floats[0].length - 1 : 0
 
 				speedDeltaY = 0
-				tweakMode = null
+				tweakMode.value = null
 			},
 			onDrag(state) {
 				const [dx, dy] = state.delta
 
-				if (!tweakMode) {
-					tweakMode = Math.abs(dx) >= Math.abs(dy) ? 'value' : 'speed'
+				if (!tweakMode.value) {
+					tweakMode.value = Math.abs(dx) >= Math.abs(dy) ? 'value' : 'speed'
 				}
 
-				if (tweakMode === 'value') {
-					const value = props.modelValue + dx * speed.value
-					emit('update:modelValue', value)
+				if (tweakMode.value === 'value') {
+					local.value = props.modelValue + dx * speed.value
+					emit('update:modelValue', local.value)
 				} else {
 					speedDeltaY += dy
 					speedMultiplierDrag.value = Math.pow(0.98, speedDeltaY)
 				}
 
 				clearTimeout(tweakTimer)
-				tweakTimer = setTimeout(() => (tweakMode = null), 250)
+				tweakTimer = setTimeout(() => (tweakMode.value = null), 250)
 			},
 			onDragEnd() {
+				speedMultiplierDrag.value = 1
 				display.value = props.modelValue
 					.toFixed(tweakPrecision.value)
 					.replace(/\.?[0]*$/, '')
 			},
 		})
+
+		useWheel(
+			({delta: [, y], event}) => {
+				event.preventDefault()
+
+				local.value = props.modelValue + y * speed.value
+				display.value = props.modelValue.toFixed(tweakPrecision.value)
+
+				emit('update:modelValue', local.value)
+			},
+			{domTarget: root, eventOptions: {passive: false}}
+		)
 
 		let hasChanged = false
 		let initialDisplay = ''
@@ -164,9 +179,10 @@ export default defineComponent({
 			let value = parseFloat(el.value)
 			if (isNaN(value)) return
 
+			local.value = value
 			hasChanged = true
 
-			emit('update:modelValue', value)
+			emit('update:modelValue', local.value)
 		}
 
 		const onBlur = () => {
